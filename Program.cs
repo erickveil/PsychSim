@@ -76,6 +76,7 @@ namespace PsychSim
     public class gametime
     {
         public DateTime current_time;
+        public DateTime last_hour;
 
         // controls the rate of real world speed
         // 1.0 = 1 tick per real second
@@ -88,6 +89,7 @@ namespace PsychSim
         public gametime()
         {
             current_time = new DateTime(1900, 1, 1, 6, 0, 0);
+            last_hour = new DateTime(1900, 1, 1, 5, 0, 0);
             speed = 0.5;
             time_rate = 0.5;
         }
@@ -102,7 +104,25 @@ namespace PsychSim
             {
                 individual.onTick();
             }
+
+            Console.WriteLine("current hour " + current_time.Hour + " last hour: " + last_hour.Hour);
+            if (current_time.Hour > last_hour.Hour)
+            {
+                //Console.WriteLine("check " + (double)(current_time.Hour - last_hour.Hour));
+                hourlyTick(inhabitants);
+                last_hour=last_hour.AddHours((double)(current_time.Hour - last_hour.Hour));
+            }
             Thread.Sleep((int)(1000 * speed));
+        }
+
+        // every hour
+        public void hourlyTick(List<Person> inhabitants)
+        {
+            Console.WriteLine("hourly");
+            foreach (Person individual in inhabitants)
+            {
+                individual.onHour();
+            }
         }
     }
 
@@ -196,7 +216,7 @@ namespace PsychSim
         public string rest_state;   // the rest state determined by restfulness
         public int restfulness;     // the current state of restfulness
         public int max_rest;    // the maximum rest possible
-        public int rest_drain;  // the speed at which one loses rest
+        public int rest_drain;  // the speed at which one loses rest per hour
         public double over_rested_level;// above this percent of max level is that too much sleep state
         public double well_rested_level; // above this percent of 
         public double rested_level; // above this percent of max rest is rested
@@ -229,15 +249,15 @@ namespace PsychSim
         public RestData(Animal o, World w, gametime clock)
         {
             owner = o;
-            max_rest=200;
+            max_rest=48;
             rest_drain = 1;
             over_rested_level=0.9;
             well_rested_level=0.7; 
             rested_level=0.6; 
             fatigued_level=0.5;   
             sleepy_level=0.4;     
-            tired_level=0.3;     
-            restfulness = (int)(max_rest * (well_rested_level + ((over_rested_level - well_rested_level) / 2)));
+            tired_level=0.3;
+            restfulness = (int)(max_rest * (rested_level + ((well_rested_level - rested_level) / 2)));
             
             sleep_time = 0;
             rest_rate = 4;
@@ -250,24 +270,25 @@ namespace PsychSim
 
         public void onTick()
         {
-            //Console.WriteLine("restdata ontick: ");
-            //Console.WriteLine("tick check time data: " + world_clock.current_time);
-            //Console.WriteLine("rest owner state: " + owner.state);
             if (owner.state == "dead")
                 return;
+        }
+
+        public void onHour()
+        {
+            if (owner.state == "dead")
+                return;
+
             if (owner.state != "asleep")
             {
                 Console.WriteLine("awake");
                 restfulness -= rest_drain;
+                calcRestState();
             }
             else
             {
                 doSleeping();
             }
-            //Console.WriteLine("rest time: " + locale.timer.world_clock);
-            calcRestState();
-
-            Console.WriteLine("restfulness: " + restfulness);
         }
 
         public void doSleeping()
@@ -275,7 +296,7 @@ namespace PsychSim
             if (owner.state == "dead")
                 return;
 
-            if (restfulness > well)
+            if (restfulness > rested)
             {
                 owner.state = "alive";
             }
@@ -316,14 +337,12 @@ namespace PsychSim
                     default:
                         break;
                 }
-                //calcRestState();
             }
             ++sleep_time;
         }
 
         public void calcRestState()
         {
-            //Console.WriteLine("tick check time data: " + world_clock.current_time);
             over=(int)( max_rest * over_rested_level);
             well=(int)( max_rest * well_rested_level);
             rested = (int)(max_rest * rested_level);
@@ -346,7 +365,7 @@ namespace PsychSim
                 rest_state = "tired";
             else if (modrest <= tired && modrest > 0)
                 rest_state = "exhausted";
-            else if (modrest <= 0)
+            else if (restfulness <= 0 && modrest <= 0)
             {
                 owner.state = "dead";
                 Console.WriteLine(owner + " died of exhaustion at modrest: "+modrest+" and restfulness: "+restfulness);
@@ -361,7 +380,6 @@ namespace PsychSim
             int start_hour = (nocturnal) ? 18 : 6;
             if (world_clock.current_time.Hour >= start_hour - 6 && world_clock.current_time.Hour <= start_hour + 6)
             {
-               // Console.WriteLine("ch");
                 newrest += 4*(world_clock.current_time.Hour - start_hour);
             }
             else
@@ -385,7 +403,7 @@ namespace PsychSim
         public bool hungry;         // is or isnt hungry
         public double hunger_level; // percentage of max_sation it takes to be hungry
         public int max_sation;      // the highet level of nutrients that can be processed by a life form, period.
-        public int burn_speed;      // number of nutrients burned per tick
+        public int burn_speed;      // number of nutrients burned per hour
         public Point location;
         public World locale;
         public Queue<Actionable> action_queue;
@@ -403,9 +421,9 @@ namespace PsychSim
             state = "alive";
             hungry = false;
             hunger_level = 0.5;
-            max_sation = 1000;
+            max_sation = 96;
             burn_speed = 1;
-            nutrition = max_sation;
+            nutrition = 75;
             location = start_location;
             locale = w;
             action_queue=new Queue<Actionable>();
@@ -461,13 +479,15 @@ namespace PsychSim
             {
                 Console.WriteLine("Lifeform is hungry.");
             }
+        }
 
+        public void onHour()
+        {
+            if (state == "dead")
+                return;
 
             if (state == "alive")
                 nutrition -= burn_speed;
-
-            // Debug feedback
-            //Console.WriteLine("Nutrition: " + nutrition);
         }
 
         public void performNextAct()
@@ -541,7 +561,13 @@ namespace PsychSim
             //Console.WriteLine("animal ontick: ");
             base.onTick();
             rest_data.onTick();
-            //Console.WriteLine(rest_data.restfulness);
+        }
+
+        new public void onHour()
+        {
+            base.onHour();
+            rest_data.onHour();
+            Console.WriteLine(rest_data.restfulness);
         }
     }
 
@@ -584,6 +610,11 @@ namespace PsychSim
 
             Console.WriteLine(rest_data.rest_state);
 
+        }
+
+        new public void onHour()
+        {
+            base.onHour();
         }
 
         // When hungry, a Person will follow a particular series of steps to eat
